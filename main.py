@@ -147,13 +147,16 @@ def other_form_groups(catalog: list[Entry]) -> dict[int, list[Entry]]:
 
 def filter_entries(entries: list[Entry], include_forms: bool = True,
                    categories: set[str] | None = None,
-                   other_forms: set[tuple[int, str]] | None = None) -> list[Entry]:
+                   other_forms: set[tuple[int, str]] | None = None,
+                   include_regular: bool = True) -> list[Entry]:
     selected = set(FORM_CATEGORIES) if categories is None else categories
     filtered = []
     for entry in entries:
         if not entry.form:
-            filtered.append(entry)
-        elif include_forms:
+            if include_regular:
+                filtered.append(entry)
+            continue
+        if include_forms:
             category = form_category(entry)
             if category in selected and (category != "Other" or other_forms is None or
                                          form_key(entry) in other_forms):
@@ -572,6 +575,7 @@ class App:
         self.zoom_name = StringVar(value="Fit width")
         self.sort_order = StringVar(value="National Dex")
         self.separate_forms = BooleanVar(value=True)
+        self.include_regular = BooleanVar(value=True)
         self.include_forms = BooleanVar(value=True)
         self.form_options = {category: BooleanVar(value=True) for category in FORM_CATEGORIES}
         self.other_selected: set[tuple[int, str]] | None = None
@@ -601,18 +605,23 @@ class App:
                      state="readonly", width=15).pack(side="left")
         ttk.Checkbutton(order_row, text="Separate regular Pokémon and forms",
                         variable=self.separate_forms).pack(side="left", padx=(18, 0))
-        forms_row = ttk.Frame(frame)
-        forms_row.pack(fill="x", pady=(12, 0))
-        ttk.Checkbutton(forms_row, text="Include forms", variable=self.include_forms,
+        selection_row = ttk.Frame(frame)
+        selection_row.pack(fill="x", pady=(12, 0))
+        ttk.Checkbutton(selection_row, text="Include regular Pokédex",
+                        variable=self.include_regular).pack(side="left", padx=(0, 18))
+        ttk.Checkbutton(selection_row, text="Include forms", variable=self.include_forms,
                         command=self.forms_changed).pack(side="left", padx=(0, 12))
+        ttk.Button(selection_row, text="Advanced form settings…",
+                   command=self.open_advanced_settings).pack(side="right")
+        forms_row = ttk.Frame(frame)
+        forms_row.pack(fill="x", pady=(8, 0))
+        ttk.Label(forms_row, text="Form groups").pack(side="left", padx=(0, 12))
         self.category_checks = []
         for category in FORM_CATEGORIES:
             options = {"textvariable": self.other_label} if category == "Other" else {"text": category}
             check = ttk.Checkbutton(forms_row, variable=self.form_options[category], **options)
             check.pack(side="left", padx=(0, 12))
             self.category_checks.append(check)
-        ttk.Button(forms_row, text="Advanced form settings…",
-                   command=self.open_advanced_settings).pack(side="left")
         settings = ttk.Frame(frame)
         settings.pack(fill="x", pady=(16, 0))
         ttk.Label(settings, text="Paper size").pack(side="left", padx=(0, 10))
@@ -648,6 +657,7 @@ class App:
         self.zoom_name.trace_add("write", lambda *_: self.redraw_preview())
         self.sort_order.trace_add("write", lambda *_: self.update_preview())
         self.separate_forms.trace_add("write", lambda *_: self.update_preview())
+        self.include_regular.trace_add("write", lambda *_: self.update_preview())
         for option in self.form_options.values():
             option.trace_add("write", lambda *_: self.update_preview())
         self.csv_path.trace_add("write", lambda *_: self.path_changed())
@@ -683,9 +693,10 @@ class App:
 
     def selected_entries(self) -> list[Entry]:
         entries = filter_entries(self.get_entries(), self.include_forms.get(),
-                                 self.selected_categories(), self.other_selected)
+                                 self.selected_categories(), self.other_selected,
+                                 include_regular=self.include_regular.get())
         if not entries:
-            raise InputError("No entries match the current form filters.")
+            raise InputError("No entries match the current selection. Include regular Pokémon or at least one form group.")
         return entries
 
     def update_other_label(self) -> None:
@@ -727,16 +738,24 @@ class App:
         categories = self.selected_categories()
         entries = sort_entries(
             filter_entries(self.catalog, self.include_forms.get(), categories,
-                           self.other_selected),
+                           self.other_selected,
+                           include_regular=self.include_regular.get()),
             self.sort_order.get(), self.separate_forms.get(),
         )
-        if not self.include_forms.get() or not categories:
+        if not entries:
+            messagebox.showerror("Cannot create CSV",
+                                 "No entries match the current selection. Include regular Pokémon or at least one form group.")
+            return
+        if not any(entry.form for entry in entries):
             suffix = "species"
-        elif categories == set(FORM_CATEGORIES):
-            suffix = "all"
+        elif categories == set(FORM_CATEGORIES) and self.other_selected is None:
+            suffix = "forms" if not self.include_regular.get() else "all"
         else:
-            suffix = "_".join(category.lower() for category in FORM_CATEGORIES
-                              if category in categories)
+            selected_groups = "_".join(category.lower() for category in FORM_CATEGORIES
+                                       if category in categories)
+            suffix = f"forms_{selected_groups}" if not self.include_regular.get() else selected_groups
+            if self.other_selected is not None and "Other" in categories:
+                suffix += "_custom"
         chosen = filedialog.asksaveasfilename(
             title="Create editable Pokémon CSV", initialdir=str(DATA_FILE.parent),
             initialfile=f"missing_pokemon_{suffix}.csv", defaultextension=".csv",

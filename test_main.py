@@ -59,8 +59,17 @@ class CatalogTests(unittest.TestCase):
             "Gigantamax": 34, "Mega": 97, "Regional": 59, "Other": 433,
         })
         self.assertEqual(len(main.filter_entries(self.catalog, False)), 1025)
+        forms_only = main.filter_entries(self.catalog, include_regular=False)
+        self.assertEqual(len(forms_only), 623)
+        self.assertTrue(all(entry.form for entry in forms_only))
+        self.assertEqual(main.filter_entries(self.catalog, False,
+                                             include_regular=False), [])
+        self.assertEqual(main.filter_entries(self.catalog, True, set(),
+                                             include_regular=False), [])
         mega_only = main.filter_entries(self.catalog, True, {"Mega"})
         self.assertEqual(len(mega_only), 1025 + 97)
+        self.assertEqual(len(main.filter_entries(self.catalog, True, {"Mega"},
+                                                  include_regular=False)), 97)
         self.assertIn(main.Entry(6, "Charizard", "Mega X"), mega_only)
         self.assertNotIn(main.Entry(6, "Charizard", "Gigantamax Form"), mega_only)
 
@@ -74,6 +83,8 @@ class CatalogTests(unittest.TestCase):
                   (869, "Vanilla Cream Strawberry Sweet")}
         filtered = main.filter_entries(self.catalog, True, {"Other"}, chosen)
         self.assertEqual(len(filtered), 1025 + 3)
+        self.assertEqual(len(main.filter_entries(self.catalog, True, {"Other"}, chosen,
+                                                  include_regular=False)), 3)
         self.assertIn(main.Entry(386, "Deoxys", "Attack Forme"), filtered)
         self.assertNotIn(main.Entry(386, "Deoxys", "Normal Forme"), filtered)
         self.assertNotIn(main.Entry(869, "Alcremie", "Gigantamax Form"), filtered)
@@ -123,6 +134,8 @@ class CatalogTests(unittest.TestCase):
 
     def test_generate_button_uses_master_and_selected_settings(self):
         app = main.App.__new__(main.App)
+        app.include_regular = Mock()
+        app.include_regular.get.return_value = False
         app.include_forms = Mock()
         app.include_forms.get.return_value = True
         app.form_options = {category: Mock() for category in main.FORM_CATEGORIES}
@@ -141,9 +154,31 @@ class CatalogTests(unittest.TestCase):
             with patch.object(main.filedialog, "asksaveasfilename", return_value=str(path)):
                 app.generate_csv()
             lines = path.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(lines), 1025 + 97)
-            self.assertEqual(lines[:2], ["Abomasnow", "Abomasnow (Mega)"])
+            self.assertEqual(len(lines), 97)
+            self.assertEqual(lines[0], "Abomasnow (Mega)")
+            self.assertNotIn("Abomasnow", lines)
             app.csv_path.set.assert_called_once_with(str(path))
+
+    def test_generator_rejects_empty_selection(self):
+        app = main.App.__new__(main.App)
+        app.include_regular = Mock()
+        app.include_regular.get.return_value = False
+        app.include_forms = Mock()
+        app.include_forms.get.return_value = False
+        app.form_options = {category: Mock() for category in main.FORM_CATEGORIES}
+        for option in app.form_options.values():
+            option.get.return_value = True
+        app.sort_order = Mock()
+        app.sort_order.get.return_value = "National Dex"
+        app.separate_forms = Mock()
+        app.separate_forms.get.return_value = True
+        app.other_selected = None
+        app.other_label = Mock()
+        with patch.object(main.messagebox, "showerror") as showerror, \
+             patch.object(main.filedialog, "asksaveasfilename") as save_dialog:
+            app.generate_csv()
+        showerror.assert_called_once()
+        save_dialog.assert_not_called()
 
     def test_pdf_contains_form_label(self):
         entries = self.read_lines(["Raichu (Alolan Form)", "Pikachu"])
