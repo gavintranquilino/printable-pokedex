@@ -10,9 +10,12 @@ Python 3.10 or newer is required. On Linux, install Tkinter for your Python dist
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python download_sprites.py
 ```
 
 On Windows, activate with `.venv\Scripts\activate` instead.
+
+`download_sprites.py` saves the 1,025 ordinary Pokémon sprites in a local `sprites/` cache. Run it once while online; later runs skip files already present. The app uses the cached sprite for each species and the same sprite for its forms. Previewing and printing then work offline. You can fetch one sprite with `python download_sprites.py 25`. If a sprite is unavailable, its row still prints with its name and number.
 
 ## Run
 
@@ -52,6 +55,8 @@ Rotom (Heat)
 
 Plain names such as `Raichu` are still accepted. To include a particular form, copy its species and form from the master into `Species (Form)` format, as above. Ordinary Dynamax is omitted; named Gigantamax forms are included.
 
-Rows can be in any order; the preview and PDF apply the chosen sort order and add National Dex numbers. Unknown names are reported with line numbers. Blank rows are ignored. Duplicate names are kept as separate entries. The PDF has no page title or footer; its columns extend close to the bottom edge. The layout changes the font size and number of columns to fit the list on one page. All 1,025 plain species fit on Letter or A4 at about 5.75–6 points. Adding every catalogued form makes the type roughly 3–3.25 points on those sizes, which will be very hard to read. Tabloid and A3 allow about 5.5 points for that full list. The PDF reads down each column, then continues at the top of the next column.
+Rows can be in any order; the preview and PDF apply the chosen sort order and add a small sprite and National Dex number to the left of each name. Unknown names are reported with line numbers. Blank rows are ignored. Duplicate names are kept as separate entries. The PDF has no page title or footer; its columns extend close to the bottom edge. The layout changes the font size and number of columns to fit the list on one page. A full species-and-forms list needs very small type on Letter or A4; Tabloid or A3 is easier to read. The PDF reads down each column, then continues at the top of the next column.
 
 The bundled reference contains 1,648 entries: one ordinary entry for each of 1,025 species and 623 named forms. Its source data comes from PokéAPI's [Pokémon forms](https://github.com/PokeAPI/pokeapi/blob/master/data/v2/csv/pokemon_forms.csv), [English form names](https://github.com/PokeAPI/pokeapi/blob/master/data/v2/csv/pokemon_form_names.csv), [Pokémon IDs](https://github.com/PokeAPI/pokeapi/blob/master/data/v2/csv/pokemon.csv), and [English species names](https://github.com/PokeAPI/pokeapi/blob/master/data/v2/csv/pokemon_species_names.csv) tables. Some entries use PokéAPI identifiers where its form name is absent or ambiguous.
+
+The sprite downloader fetches numbered PNGs from the [PokéAPI sprites repository](https://github.com/PokeAPI/sprites). The cache is ignored by Git, so each checkout can download its own copy.

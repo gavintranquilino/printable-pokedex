@@ -6,7 +6,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from PIL import Image
+
 import main
+
+try:
+    import pymupdf
+except ImportError:
+    pymupdf = None
 
 
 class CatalogTests(unittest.TestCase):
@@ -183,9 +190,44 @@ class CatalogTests(unittest.TestCase):
     def test_pdf_contains_form_label(self):
         entries = self.read_lines(["Raichu (Alolan Form)", "Pikachu"])
         output = io.BytesIO()
-        main.create_pdf(entries, output, main.PAGES["US Letter"])
+        with tempfile.TemporaryDirectory() as directory:
+            main.create_pdf(entries, output, main.PAGES["US Letter"],
+                            sprite_dir=Path(directory))
         self.assertTrue(output.getvalue().startswith(b"%PDF-"))
         self.assertGreater(len(output.getvalue()), 1000)
+        self.assertNotIn(b"/Subtype /Image", output.getvalue())
+
+    def test_species_and_form_share_a_sprite_to_the_left_of_the_number(self):
+        entries = self.read_lines(["Pikachu", "Pikachu (Gigantamax Form)"])
+        with tempfile.TemporaryDirectory() as directory:
+            Image.new("RGBA", (16, 16), (255, 200, 0, 255)).save(
+                Path(directory) / "25.png")
+            output = io.BytesIO()
+            main.create_pdf(entries, output, main.PAGES["US Letter"],
+                            sprite_dir=Path(directory))
+            self.assertIn(b"/Subtype /Image", output.getvalue())
+            if pymupdf is None:
+                return
+            with pymupdf.open(stream=output.getvalue(), filetype="pdf") as document:
+                self.assertEqual(len(document), 1)
+                page = document[0]
+                images = page.get_images(full=True)
+                self.assertEqual(len(images), 1)
+                positions = page.get_image_rects(images[0][0])
+                self.assertEqual(len(positions), 2)
+                number_positions = page.search_for("0025")
+                for sprite in positions:
+                    numbers_on_row = [number for number in number_positions
+                                      if number.y0 < sprite.y1 and number.y1 > sprite.y0
+                                      and sprite.x1 < number.x0 < sprite.x1 + 20]
+                    self.assertEqual(len(numbers_on_row), 1)
+
+    def test_all_catalog_entries_still_fit_one_page_with_sprite_slots(self):
+        for page in ("US Letter", "A4", "Tabloid", "A3"):
+            with self.subTest(page=page):
+                layout = main.choose_layout(self.catalog, main.PAGES[page])
+                self.assertLessEqual(len(self.catalog), layout.rows * layout.columns)
+                self.assertGreater(layout.sprite_size, 0)
 
 
 if __name__ == "__main__":

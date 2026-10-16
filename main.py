@@ -22,6 +22,7 @@ from reportlab.pdfgen import canvas
 
 DATA_FILE = Path(__file__).with_name("pokemon_species.csv")
 DEFAULT_INPUT = Path(__file__).with_name("missing_pokemon.csv")
+SPRITE_DIR = Path(__file__).with_name("sprites")
 PAGES = {"US Letter": letter, "A4": A4, "Tabloid": TABLOID, "A3": A3}
 MARGIN = 18
 TOP_MARGIN = 12
@@ -66,6 +67,8 @@ class Layout:
     column_width: float
     number_font: float
     name_offset: float
+    sprite_size: float
+    number_offset: float
 
 
 class CsvWatcher:
@@ -241,7 +244,9 @@ def choose_layout(entries: list[Entry], page_size: tuple[float, float]) -> Layou
         max_rows = math.floor(usable_height / row_height)
         number_font = max(2.5, font_size - 0.5)
         number_width = stringWidth("0000", "Helvetica", number_font)
-        name_offset = 3.5 + number_width
+        sprite_size = min(12, font_size * 1.2, row_height - 0.6)
+        number_offset = 1.5 + sprite_size + 1.25
+        name_offset = number_offset + number_width + 2
         widest_plain = max(
             (stringWidth(entry.label, "Helvetica", 1) for entry in entries if not entry.form),
             default=0,
@@ -261,7 +266,7 @@ def choose_layout(entries: list[Entry], page_size: tuple[float, float]) -> Layou
                 # Spread a dense list down to the printable bottom edge.
                 drawn_row_height = usable_height / rows if rows >= 30 else row_height
                 return Layout(columns, rows, font_size, drawn_row_height, column_width,
-                              number_font, name_offset)
+                              number_font, name_offset, sprite_size, number_offset)
     raise InputError("This list is too large to place on one page, even at the smallest font size.")
 
 
@@ -283,7 +288,7 @@ def column_heading(group: list[Entry], order: str, separate_forms: bool) -> tupl
 
 def create_pdf(entries: list[Entry], destination: Path | io.BytesIO,
                page_size: tuple[float, float], order: str = "National Dex",
-               separate_forms: bool = True) -> Layout:
+               separate_forms: bool = True, sprite_dir: Path = SPRITE_DIR) -> Layout:
     entries = sort_entries(entries, order, separate_forms)
     layout = choose_layout(entries, page_size)
     _, height = page_size
@@ -292,6 +297,7 @@ def create_pdf(entries: list[Entry], destination: Path | io.BytesIO,
     pdf.setTitle(f"{order} Pokémon list")
     pdf.setAuthor("Printable Pokédex")
     top = height - TOP_MARGIN
+    sprite_paths = {entry.number: sprite_dir / f"{entry.number}.png" for entry in entries}
     for col in range(layout.columns):
         group = entries[col * layout.rows:(col + 1) * layout.rows]
         if not group:
@@ -314,10 +320,16 @@ def create_pdf(entries: list[Entry], destination: Path | io.BytesIO,
             if row and row == form_boundary:
                 pdf.setStrokeColor(colors.HexColor("#8795A6"))
                 pdf.line(x, row_top, x + layout.column_width, row_top)
+            sprite_path = sprite_paths[entry.number]
+            if sprite_path.is_file():
+                sprite_y = row_top - (layout.row_height + layout.sprite_size) / 2
+                pdf.drawImage(str(sprite_path), x + 1.5, sprite_y,
+                              width=layout.sprite_size, height=layout.sprite_size,
+                              mask="auto")
             pdf.setFillColor(colors.HexColor("#526276"))
             pdf.setFont("Helvetica", layout.number_font)
             number_y = row_top - (layout.row_height + layout.number_font) / 2
-            pdf.drawString(x + 1.5, number_y, f"{entry.number:04d}")
+            pdf.drawString(x + layout.number_offset, number_y, f"{entry.number:04d}")
             pdf.setFillColor(colors.HexColor("#17263D"))
             available = layout.column_width - layout.name_offset - 1.5
             unit_width = stringWidth(entry.label, "Helvetica", 1)
@@ -365,9 +377,11 @@ def render_pdf_image(pdf_bytes: bytes, dpi: int = 180) -> Image.Image:
 
 def create_preview_image(entries: list[Entry],
                          page_size: tuple[float, float], order: str = "National Dex",
-                         separate_forms: bool = True) -> tuple[Layout, Image.Image]:
+                         separate_forms: bool = True,
+                         sprite_dir: Path = SPRITE_DIR) -> tuple[Layout, Image.Image]:
     pdf_bytes = io.BytesIO()
-    layout = create_pdf(entries, pdf_bytes, page_size, order, separate_forms)
+    layout = create_pdf(entries, pdf_bytes, page_size, order, separate_forms,
+                        sprite_dir)
     return layout, render_pdf_image(pdf_bytes.getvalue())
 
 
@@ -788,9 +802,16 @@ class App:
             self.status.set(str(exc))
         else:
             self.preview_message = ""
+            numbers = {entry.number for entry in entries}
+            cached = sum((SPRITE_DIR / f"{number}.png").is_file()
+                         for number in numbers)
+            sprite_status = f" • {cached}/{len(numbers)} sprites"
+            if cached < len(numbers):
+                sprite_status += " (run python download_sprites.py)"
             self.status.set(
                 f"{len(entries)} entries • {layout.columns} columns • "
                 f"{layout.font_size:g} pt • one {self.page_name.get()} page"
+                f"{sprite_status}"
             )
         self.redraw_preview()
 
